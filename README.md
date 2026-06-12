@@ -8,12 +8,13 @@ This project studies a simple index timing task. The workflow is organized as a 
 
 2. Feature layer
 
-   The feature groups are defined in `src/feature_groups.py`:
+   The selected model features are defined directly in `src/model_features.py`:
 
-   - `market`: basic price and volume features
-   - `regime`: market features plus trend and risk state
-   - `momentum`: market features plus normalized momentum state
-   - `composite`: all available features
+   - `logistic_regression`: 12 selected high-importance technical and trend features
+   - `random_forest`: 16 selected momentum and trend-strength features
+   - `gradient_boosting`: all 20 selected feature-engineering features
+   - `hist_gradient_boosting`: all 20 selected feature-engineering features
+   - `lightgbm`: all 20 selected feature-engineering features
 
 3. Model layer
 
@@ -48,7 +49,7 @@ This project studies a simple index timing task. The workflow is organized as a 
 6. Feature importance layer
 
    `scripts/analyze_feature_importance.py` fits a Random Forest on the training
-   split and ranks the current 28 feature columns. This is a diagnostic step,
+   split and ranks the current feature columns. This is a diagnostic step,
    not an additional trading model.
 
 ## Current Results
@@ -56,38 +57,33 @@ This project studies a simple index timing task. The workflow is organized as a 
 Best test return among the searched ML combinations:
 
 ```text
-logistic_regression + composite
-mapping = linear_clipped
-smoothing_window = 3
+hist_gradient_boosting + explicit 20 feature-engineering features
+mapping = rank_linear
+smoothing_window = 1
 
-test_return = 107.35%
-max_drawdown = -14.62%
-sharpe = 2.69
-excess_vs_buy_hold = +8.07%
+test_return = 115.36%
+max_drawdown = -5.87%
+sharpe = 3.84
+excess_vs_buy_hold = +16.08%
 ```
 
 Best test Sharpe:
 
 ```text
-random_forest + momentum
-mapping = linear_clipped
-smoothing_window = 5
+hist_gradient_boosting + explicit 20 feature-engineering features
+mapping = rank_linear
+smoothing_window = 1
 
-test_return = 87.07%
-max_drawdown = -7.94%
-sharpe = 2.97
+test_return = 115.36%
+max_drawdown = -5.87%
+sharpe = 3.84
 ```
 
-Best LightGBM combination:
+Best LightGBM combinations:
 
 ```text
-lightgbm + momentum
-mapping = linear_clipped
-smoothing_window = 3
-
-test_return = 105.13%
-max_drawdown = -11.95%
-sharpe = 2.77
+current explicit features: lightgbm, test_return = 80.74%, sharpe = 2.07
+historical feature-set leader: lightgbm + momentum, test_return = 105.13%, sharpe = 2.77
 ```
 
 ## Reproduce
@@ -98,22 +94,13 @@ Use the `finance` conda environment, then run:
 python scripts/run_all.py
 ```
 
-To rerun only the model and feature-group search:
-
-```bash
-python scripts/run_feature_group_ablation.py
-```
+The runner uses aggressive CPU settings by default. Set `FINANCE_WORKERS` to
+override the worker count on smaller machines.
 
 To rerun only the feature importance diagnostic:
 
 ```bash
 python scripts/analyze_feature_importance.py
-```
-
-The number of workers can be controlled with:
-
-```bash
-FINANCE_WORKERS=4 python scripts/run_feature_group_ablation.py
 ```
 
 Main outputs are written to:

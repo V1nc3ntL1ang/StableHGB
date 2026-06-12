@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 import pandas as pd
+from joblib import Parallel, delayed
 from sklearn.metrics import accuracy_score, roc_auc_score
 
 
@@ -11,8 +13,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.backtest import compute_metrics, run_backtest, write_equity_csv, write_metrics_csv
-from src.feature_groups import FEATURE_GROUPS, MODEL_FEATURE_GROUPS
 from src.ml_models import get_ml_models
+from src.model_features import MODEL_FEATURE_COLUMNS
 from src.paths import ML_DATASET_CSV, ML_EQUITY_CSV, ML_METRICS_CSV, ensure_output_dirs
 from src.position_policy import build_position, iter_position_policy_candidates
 
@@ -22,6 +24,10 @@ TEST_START = pd.Timestamp("2025-01-01")
 SELECTION_OBJECTIVE = "weighted_valid_return_sharpe"
 RETURN_WEIGHT = 0.5
 SHARPE_WEIGHT = 0.5
+
+
+def get_worker_count() -> int:
+    return int(os.environ.get("FINANCE_WORKERS", os.cpu_count() or 1))
 
 
 def load_dataset() -> pd.DataFrame:
@@ -44,14 +50,10 @@ def choose_exposure_mapping(
     *,
     buy_hold_valid_metrics: dict[str, float],
 ) -> tuple[dict[str, float], dict[str, float], dict[str, float]]:
-    best_params: dict[str, float] | None = None
-    best_metrics: dict[str, float] | None = None
-    best_scores: dict[str, float] | None = None
-
     buy_hold_return = buy_hold_valid_metrics["cumulative_return"]
     buy_hold_sharpe = buy_hold_valid_metrics["sharpe"]
 
-    for params in iter_position_policy_candidates():
+    def evaluate_params(params: dict[str, float | int | str]) -> tuple[dict[str, float | int | str], dict[str, float], dict[str, float]]:
         position = build_position(probability, params)
         valid_equity = run_backtest(df, position, test_start=VALID_START, test_end=TEST_START)
         metrics = compute_metrics(valid_equity)
@@ -64,26 +66,80 @@ def choose_exposure_mapping(
             "valid_return_score": return_score,
             "valid_sharpe_score": sharpe_score,
         }
+        return params.copy(), metrics, scores
 
-        if (
-            best_scores is None
-            or selection_score > best_scores["valid_selection_score"]
-            or (
-                selection_score == best_scores["valid_selection_score"]
-                and metrics["cumulative_return"] > (best_metrics or {})["cumulative_return"]
-            )
-        ):
-            best_params = params.copy()
-            best_metrics = metrics
-            best_scores = scores
+    candidates = list(iter_position_policy_candidates())
+    results = Parallel(n_jobs=get_worker_count(), prefer="threads")(
+        delayed(evaluate_params)(params) for params in candidates
+    )
 
-    if best_params is None or best_metrics is None or best_scores is None:
-        raise RuntimeError("No valid exposure mapping was evaluated")
+    best_params, best_metrics, best_scores = max(
+        results,
+        key=lambda item: (item[2]["valid_selection_score"], item[1]["cumulative_return"]),
+    )
+
     return best_params, best_metrics, best_scores
+
+
+def evaluate_model(
+    model_name: str,
+    df: pd.DataFrame,
+    train: pd.DataFrame,
+    valid: pd.DataFrame,
+    test: pd.DataFrame,
+    y_train: pd.Series,
+    y_valid: pd.Series,
+    y_test: pd.Series,
+    valid_buy_hold_metrics: dict[str, float],
+) -> tuple[dict[str, float | str], pd.DataFrame]:
+    model = get_ml_models(n_jobs=get_worker_count())[model_name]
+    feature_columns = MODEL_FEATURE_COLUMNS[model_name]
+    model.fit(train[feature_columns], y_train)
+
+    probability = pd.Series(model.predict_proba(df[feature_columns])[:, 1], index=df.index)
+    valid_probability = probability.loc[valid.index]
+    test_probability = probability.loc[test.index]
+
+    mapping_params, valid_backtest_metrics, valid_selection_scores = choose_exposure_mapping(
+        df,
+        probability,
+        buy_hold_valid_metrics=valid_buy_hold_metrics,
+    )
+    position = build_position(probability, mapping_params)
+    test_equity = run_backtest(df, position, test_start=TEST_START)
+    test_backtest_metrics = compute_metrics(test_equity)
+
+    valid_pred = (valid_probability >= 0.5).astype(int)
+    test_pred = (test_probability >= 0.5).astype(int)
+
+    metric_row: dict[str, float | str] = {
+        "model": model_name,
+        "feature_count": len(feature_columns),
+        "features": ", ".join(feature_columns),
+        "selection_objective": SELECTION_OBJECTIVE,
+        "return_weight": RETURN_WEIGHT,
+        "sharpe_weight": SHARPE_WEIGHT,
+        **valid_selection_scores,
+        **mapping_params,
+        "valid_accuracy": float(accuracy_score(y_valid, valid_pred)),
+        "test_accuracy": float(accuracy_score(y_test, test_pred)),
+        "valid_auc": safe_auc(y_valid, valid_probability),
+        "test_auc": safe_auc(y_test, test_probability),
+        "valid_cumulative_return": valid_backtest_metrics["cumulative_return"],
+        "valid_max_drawdown": valid_backtest_metrics["max_drawdown"],
+        "valid_sharpe": valid_backtest_metrics["sharpe"],
+        **test_backtest_metrics,
+    }
+
+    test_equity.insert(0, "model", model_name)
+    return metric_row, test_equity
 
 
 def main() -> None:
     ensure_output_dirs()
+    worker_count = get_worker_count()
+    print(f"aggressive CPU mode: workers={worker_count}", flush=True)
+
     df = load_dataset()
     train = df[df["split"] == "train"]
     valid = df[df["split"] == "valid"]
@@ -93,59 +149,29 @@ def main() -> None:
     y_valid = valid["future_up_5d"]
     y_test = test["future_up_5d"]
 
-    metrics_rows: list[dict[str, float | str]] = []
-    equity_frames: list[pd.DataFrame] = []
     buy_hold_position = pd.Series(1.0, index=df.index)
     valid_buy_hold_metrics = compute_metrics(
         run_backtest(df, buy_hold_position, test_start=VALID_START, test_end=TEST_START)
     )
 
-    for model_name, model in get_ml_models().items():
-        feature_group = MODEL_FEATURE_GROUPS.get(model_name, "composite")
-        feature_columns = FEATURE_GROUPS[feature_group]
-        x_train = train[feature_columns]
-        x_valid = valid[feature_columns]
-        x_test = test[feature_columns]
-        model.fit(x_train, y_train)
-
-        probability = pd.Series(model.predict_proba(df[feature_columns])[:, 1], index=df.index)
-        valid_probability = probability.loc[valid.index]
-        test_probability = probability.loc[test.index]
-
-        mapping_params, valid_backtest_metrics, valid_selection_scores = choose_exposure_mapping(
+    model_names = list(get_ml_models(n_jobs=worker_count))
+    results = Parallel(n_jobs=min(worker_count, len(model_names)), prefer="processes")(
+        delayed(evaluate_model)(
+            model_name,
             df,
-            probability,
-            buy_hold_valid_metrics=valid_buy_hold_metrics,
+            train,
+            valid,
+            test,
+            y_train,
+            y_valid,
+            y_test,
+            valid_buy_hold_metrics,
         )
-        position = build_position(probability, mapping_params)
-        test_equity = run_backtest(df, position, test_start=TEST_START)
-        test_backtest_metrics = compute_metrics(test_equity)
+        for model_name in model_names
+    )
 
-        valid_pred = (valid_probability >= 0.5).astype(int)
-        test_pred = (test_probability >= 0.5).astype(int)
-
-        metric_row: dict[str, float | str] = {
-            "model": model_name,
-            "feature_group": feature_group,
-            "feature_count": len(feature_columns),
-            "selection_objective": SELECTION_OBJECTIVE,
-            "return_weight": RETURN_WEIGHT,
-            "sharpe_weight": SHARPE_WEIGHT,
-            **valid_selection_scores,
-            **mapping_params,
-            "valid_accuracy": float(accuracy_score(y_valid, valid_pred)),
-            "test_accuracy": float(accuracy_score(y_test, test_pred)),
-            "valid_auc": safe_auc(y_valid, valid_probability),
-            "test_auc": safe_auc(y_test, test_probability),
-            "valid_cumulative_return": valid_backtest_metrics["cumulative_return"],
-            "valid_max_drawdown": valid_backtest_metrics["max_drawdown"],
-            "valid_sharpe": valid_backtest_metrics["sharpe"],
-            **test_backtest_metrics,
-        }
-        metrics_rows.append(metric_row)
-
-        test_equity.insert(0, "model", model_name)
-        equity_frames.append(test_equity)
+    metrics_rows = [row for row, _equity in results]
+    equity_frames = [equity for _row, equity in results]
 
     metrics = pd.DataFrame(metrics_rows)
     buy_hold_return = compute_metrics(run_backtest(df, buy_hold_position, test_start=TEST_START))["cumulative_return"]

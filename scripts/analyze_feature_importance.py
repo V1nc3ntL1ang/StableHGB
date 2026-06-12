@@ -20,7 +20,7 @@ RANDOM_STATE = 42
 
 
 def get_worker_count() -> int:
-    return int(os.environ.get("FINANCE_WORKERS", "-1"))
+    return int(os.environ.get("FINANCE_WORKERS", os.cpu_count() or 1))
 
 
 def load_dataset() -> pd.DataFrame:
@@ -74,6 +74,8 @@ def plot_feature_importance(importance: pd.DataFrame, top_n: int = 20) -> None:
 
 def main() -> None:
     ensure_output_dirs()
+    print(f"aggressive CPU mode: workers={get_worker_count()}", flush=True)
+
     df = load_dataset()
     importance = compute_feature_importance(df)
     write_feature_importance(importance)

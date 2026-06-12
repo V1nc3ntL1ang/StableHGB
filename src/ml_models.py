@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections import OrderedDict
 
 from lightgbm import LGBMClassifier
@@ -13,6 +14,8 @@ RANDOM_STATE = 42
 
 
 def get_ml_models(n_jobs: int | None = None) -> OrderedDict[str, object]:
+    worker_count = n_jobs if n_jobs is not None else int(os.environ.get("FINANCE_WORKERS", os.cpu_count() or 1))
+
     return OrderedDict(
         [
             (
@@ -31,7 +34,7 @@ def get_ml_models(n_jobs: int | None = None) -> OrderedDict[str, object]:
                     min_samples_leaf=8,
                     random_state=RANDOM_STATE,
                     class_weight="balanced_subsample",
-                    n_jobs=n_jobs,
+                    n_jobs=worker_count,
                 ),
             ),
             (
@@ -66,7 +69,7 @@ def get_ml_models(n_jobs: int | None = None) -> OrderedDict[str, object]:
                     reg_lambda=1.0,
                     random_state=RANDOM_STATE,
                     verbosity=-1,
-                    n_jobs=n_jobs,
+                    n_jobs=worker_count,
                 ),
             ),
         ]

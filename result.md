@@ -1,79 +1,53 @@
 # 指数择时实验结果表
 
-数据标的：`SH#880823` 微盘股指数  
-初始资金：100000  
-测试区间：2025-01-01 至数据末尾  
-说明：非 LSTM 结果来自 `python scripts/run_all.py` 重新生成的实验输出；LSTM 结果直接照搬 `feature/lstm` 分支已有实验结果，本次没有重跑 LSTM。
-
-## 基准策略
-
-| 策略 | 累计收益 | 最大回撤 | 夏普 | 相对买入持有超额 |
-|---|---:|---:|---:|---:|
-| buy_hold | 109.21% | -17.26% | 2.30 | 0.00% |
-| ma20_timing | 77.64% | -10.90% | 2.76 | -31.58% |
-| momentum20_timing | 55.73% | -17.91% | 1.77 | -53.48% |
-| ma20_momentum20_combo | 66.94% | -11.69% | 2.38 | -42.27% |
-| theoretical_optimal | 917.68% | 0.00% | 12.47 | 808.46% |
-
-## 默认机器学习模型
-
-| 模型 | 特征组 | 特征数 | 累计收益 | 最大回撤 | 夏普 | Test AUC | 相对买入持有超额 |
-|---|---|---:|---:|---:|---:|---:|---:|
-| logistic_regression | composite | 28 | 107.35% | -14.62% | 2.69 | 0.634 | 8.07% |
-| random_forest | momentum | 20 | 87.07% | -7.94% | 2.97 | 0.639 | -12.21% |
-| gradient_boosting | composite | 28 | 87.01% | -13.48% | 2.50 | 0.600 | -12.27% |
-| hist_gradient_boosting | composite | 28 | 80.73% | -14.70% | 2.17 | 0.623 | -18.54% |
-| lightgbm | composite | 28 | 86.00% | -12.80% | 2.45 | 0.650 | -13.28% |
-| LSTM (GRU) | composite | 28 | 84.73% | -15.30% | 2.18 | 0.486 | -14.55% |
-
-## 特征组消融 Top 10
-
-| 排名 | 模型 | 特征组 | 特征数 | 累计收益 | 最大回撤 | 夏普 | Test AUC | 相对买入持有超额 |
-|---:|---|---|---:|---:|---:|---:|---:|---:|
-| 1 | logistic_regression | composite | 28 | 107.35% | -14.62% | 2.69 | 0.634 | 8.07% |
-| 2 | lightgbm | momentum | 20 | 105.13% | -11.95% | 2.77 | 0.612 | 5.85% |
-| 3 | random_forest | regime | 20 | 103.54% | -11.89% | 2.62 | 0.646 | 4.26% |
-| 4 | lightgbm | regime | 20 | 102.07% | -15.70% | 2.36 | 0.635 | 2.79% |
-| 5 | random_forest | composite | 28 | 90.31% | -10.86% | 2.67 | 0.647 | -8.96% |
-| 6 | logistic_regression | momentum | 20 | 87.31% | -14.84% | 2.10 | 0.620 | -11.97% |
-| 7 | random_forest | momentum | 20 | 87.07% | -7.94% | 2.97 | 0.639 | -12.21% |
-| 8 | gradient_boosting | composite | 28 | 87.01% | -13.48% | 2.50 | 0.600 | -12.27% |
-| 9 | lightgbm | composite | 28 | 86.00% | -12.80% | 2.45 | 0.650 | -13.28% |
-| 10 | logistic_regression | market | 12 | 84.69% | -13.03% | 2.29 | 0.618 | -14.58% |
-
-## 特征重要性 Top 15
-
-| 排名 | 特征 | 重要性 |
-|---:|---|---:|
-| 1 | volatility20_rank | 0.0615 |
-| 2 | volatility5 | 0.0585 |
-| 3 | ma60 | 0.0483 |
-| 4 | rebound_from_60d_low | 0.0480 |
-| 5 | volatility20 | 0.0479 |
-| 6 | rebound_from_20d_low | 0.0465 |
-| 7 | ma10 | 0.0432 |
-| 8 | ma20 | 0.0415 |
-| 9 | close_vs_ma60 | 0.0410 |
-| 10 | trend_strength60 | 0.0409 |
-| 11 | ma5 | 0.0401 |
-| 12 | ma60_slope | 0.0360 |
-| 13 | momentum20 | 0.0352 |
-| 14 | ma20_slope | 0.0340 |
-| 15 | volume_zscore20 | 0.0337 |
-
-## LSTM 对照结果
-
-此部分直接照搬 `feature/lstm` 分支结果。
-
-| 特征组 | 累计收益 | 最大回撤 | 夏普 | Test AUC |
-|---|---:|---:|---:|---:|
-| market(12) | 84.73% | -15.30% | 2.18 | 0.500 |
-| regime(20) | 84.73% | -15.30% | 2.18 | 0.500 |
-| momentum(20) | 84.73% | -15.30% | 2.18 | 0.500 |
-| composite(28) | 84.73% | -15.30% | 2.18 | 0.486 |
-
-LSTM 使用 `lookback=15`、`gru_units=32`、`dropout=0.3`，仓位映射为 `sigmoid`，`min_position=0.5`、`max_position=1.0`、`smoothing_window=5`。该分支结论是 LSTM 在当前小样本金融数据上基本没有学到有效排序信号，AUC 约等于随机猜测。
-
-## 结论
-
-默认模型中，`logistic_regression + composite` 的累计收益最高，并且相对买入持有有 8.07% 超额。完整特征组消融里，`lightgbm + momentum` 和 `random_forest + regime` 也能跑出正超额。LSTM 结果作为对照保留，但不作为主方案。
+| 方法 | 累计收益 | 最大回撤 | 夏普 | Test AUC | 相对买入持有超额 | 特征数 | 特征 | 仓位策略 |
+|---|---:|---:|---:|---:|---:|---:|---|---|
+| buy_hold | 109.21% | -17.26% | 2.30 | - | 0.00% | - | - | `buy_hold` 固定满仓 |
+| ma20_timing | 77.64% | -10.90% | 2.76 | - | -31.58% | - | - | `ma20_timing` 收盘价高于 MA20 满仓，否则空仓 |
+| momentum20_timing | 55.73% | -17.91% | 1.77 | - | -53.48% | - | - | `momentum20_timing` 20日动量为正满仓，否则空仓 |
+| ma20_momentum20_combo | 66.94% | -11.69% | 2.38 | - | -42.27% | - | - | `ma20_momentum20_combo` MA20 与 momentum20 同时满足满仓，否则空仓 |
+| theoretical_optimal | 917.68% | 0.00% | 12.47 | - | 808.46% | - | - | `theoretical_optimal` 使用未来涨跌的理论最优仓位 |
+| logistic_regression | 107.35% | -14.62% | 2.69 | 0.634 | 8.07% | 28 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `linear_clipped` lower=0.50, upper=0.50, min=0.00, max=1.00, smooth=3 |
+| random_forest | 87.07% | -7.94% | 2.97 | 0.639 | -12.21% | 20 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `linear_clipped` lower=0.50, upper=0.65, min=0.00, max=1.00, smooth=5 |
+| gradient_boosting | 87.01% | -13.48% | 2.50 | 0.600 | -12.27% | 28 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `linear_clipped` lower=0.50, upper=0.55, min=0.00, max=1.00, smooth=5 |
+| hist_gradient_boosting | 80.73% | -14.70% | 2.17 | 0.623 | -18.54% | 28 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `linear_clipped` lower=0.50, upper=0.55, min=0.00, max=1.00, smooth=5 |
+| lightgbm | 86.00% | -12.80% | 2.45 | 0.650 | -13.28% | 28 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `linear_clipped` lower=0.50, upper=0.65, min=0.00, max=1.00, smooth=5 |
+| logistic_regression | 84.69% | -13.03% | 2.29 | 0.618 | -14.58% | 12 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20` | `sigmoid` center=0.55, sharpness=8.0, min=0.50, max=1.00, smooth=5 |
+| random_forest | 64.71% | -11.52% | 2.12 | 0.567 | -34.57% | 12 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20` | `linear_clipped` lower=0.50, upper=0.65, min=0.00, max=1.00, smooth=3 |
+| gradient_boosting | 40.54% | -11.65% | 1.51 | 0.538 | -58.73% | 12 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20` | `linear_clipped` lower=0.35, upper=0.50, min=0.00, max=1.00, smooth=5 |
+| hist_gradient_boosting | 67.28% | -13.06% | 2.14 | 0.526 | -32.00% | 12 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20` | `linear_clipped` lower=0.40, upper=0.50, min=0.50, max=0.75, smooth=1 |
+| lightgbm | 74.38% | -17.60% | 1.82 | 0.556 | -24.90% | 12 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20` | `linear_clipped` lower=0.50, upper=0.55, min=0.00, max=1.00, smooth=1 |
+| logistic_regression | 107.35% | -14.62% | 2.69 | 0.634 | 8.07% | 28 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `linear_clipped` lower=0.50, upper=0.50, min=0.00, max=1.00, smooth=3 |
+| random_forest | 90.31% | -10.86% | 2.67 | 0.647 | -8.96% | 28 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `linear_clipped` lower=0.50, upper=0.60, min=0.00, max=1.00, smooth=5 |
+| gradient_boosting | 87.01% | -13.48% | 2.50 | 0.600 | -12.27% | 28 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `linear_clipped` lower=0.50, upper=0.55, min=0.00, max=1.00, smooth=5 |
+| hist_gradient_boosting | 80.73% | -14.70% | 2.17 | 0.623 | -18.54% | 28 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `linear_clipped` lower=0.50, upper=0.55, min=0.00, max=1.00, smooth=5 |
+| lightgbm | 86.00% | -12.80% | 2.45 | 0.650 | -13.28% | 28 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `linear_clipped` lower=0.50, upper=0.65, min=0.00, max=1.00, smooth=5 |
+| logistic_regression | 84.69% | -13.03% | 2.29 | 0.618 | -14.58% | 12 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20` | `sigmoid` center=0.55, sharpness=8.0, min=0.50, max=1.00, smooth=5 |
+| random_forest | 64.71% | -11.52% | 2.12 | 0.567 | -34.57% | 12 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20` | `linear_clipped` lower=0.50, upper=0.65, min=0.00, max=1.00, smooth=3 |
+| gradient_boosting | 40.54% | -11.65% | 1.51 | 0.538 | -58.73% | 12 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20` | `linear_clipped` lower=0.35, upper=0.50, min=0.00, max=1.00, smooth=5 |
+| hist_gradient_boosting | 67.28% | -13.06% | 2.14 | 0.526 | -32.00% | 12 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20` | `linear_clipped` lower=0.40, upper=0.50, min=0.50, max=0.75, smooth=1 |
+| lightgbm | 74.38% | -17.60% | 1.82 | 0.556 | -24.90% | 12 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20` | `linear_clipped` lower=0.50, upper=0.55, min=0.00, max=1.00, smooth=1 |
+| logistic_regression | 82.83% | -12.51% | 2.48 | 0.610 | -16.45% | 20 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank` | `sigmoid` center=0.55, sharpness=8.0, min=0.00, max=1.00, smooth=3 |
+| random_forest | 103.54% | -11.89% | 2.62 | 0.646 | 4.26% | 20 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank` | `linear_clipped` lower=0.50, upper=0.55, min=0.00, max=1.00, smooth=1 |
+| gradient_boosting | 62.78% | -12.79% | 2.08 | 0.580 | -36.50% | 20 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank` | `linear_clipped` lower=0.35, upper=0.50, min=0.00, max=1.00, smooth=5 |
+| hist_gradient_boosting | 72.91% | -13.47% | 2.10 | 0.602 | -26.37% | 20 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank` | `linear_clipped` lower=0.50, upper=0.65, min=0.00, max=1.00, smooth=5 |
+| lightgbm | 102.07% | -15.70% | 2.36 | 0.635 | 2.79% | 20 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank` | `linear_clipped` lower=0.50, upper=0.50, min=0.00, max=1.00, smooth=1 |
+| logistic_regression | 87.31% | -14.84% | 2.10 | 0.620 | -11.97% | 20 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `linear_clipped` lower=0.45, upper=0.50, min=0.00, max=1.00, smooth=3 |
+| random_forest | 87.07% | -7.94% | 2.97 | 0.639 | -12.21% | 20 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `linear_clipped` lower=0.50, upper=0.65, min=0.00, max=1.00, smooth=5 |
+| gradient_boosting | 55.98% | -11.65% | 2.09 | 0.598 | -43.29% | 20 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `rank_linear` lower_rank=0.4, upper_rank=0.8, min=0.00, max=1.00, smooth=1 |
+| hist_gradient_boosting | 64.41% | -5.84% | 2.69 | 0.617 | -34.86% | 20 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `rank_linear` lower_rank=0.4, upper_rank=0.8, min=0.00, max=1.00, smooth=5 |
+| lightgbm | 105.13% | -11.95% | 2.77 | 0.612 | 5.85% | 20 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `linear_clipped` lower=0.50, upper=0.65, min=0.00, max=1.00, smooth=3 |
+| logistic_regression | 107.35% | -14.62% | 2.69 | 0.634 | 8.07% | 28 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `linear_clipped` lower=0.50, upper=0.50, min=0.00, max=1.00, smooth=3 |
+| random_forest | 90.31% | -10.86% | 2.67 | 0.647 | -8.96% | 28 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `linear_clipped` lower=0.50, upper=0.60, min=0.00, max=1.00, smooth=5 |
+| gradient_boosting | 87.01% | -13.48% | 2.50 | 0.600 | -12.27% | 28 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `linear_clipped` lower=0.50, upper=0.55, min=0.00, max=1.00, smooth=5 |
+| hist_gradient_boosting | 80.73% | -14.70% | 2.17 | 0.623 | -18.54% | 28 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `linear_clipped` lower=0.50, upper=0.55, min=0.00, max=1.00, smooth=5 |
+| lightgbm | 86.00% | -12.80% | 2.45 | 0.650 | -13.28% | 28 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `linear_clipped` lower=0.50, upper=0.65, min=0.00, max=1.00, smooth=5 |
+| logistic_regression | 88.54% | -14.68% | 2.35 | 0.623 | -10.74% | 12 | `volatility5`, `volatility20_rank`, `rebound_from_60d_low`, `volatility20`, `macd_histogram`, `bb_width`, `trend_strength60`, `macd_signal`, `ma60`, `rebound_from_20d_low`, `bb_lower`, `ma60_slope` | `linear_clipped` lower=0.50, upper=0.60, min=0.00, max=1.00, smooth=3 |
+| random_forest | 85.97% | -16.90% | 2.19 | 0.641 | -13.31% | 16 | `ma5`, `ma10`, `ma20`, `ma60`, `momentum20`, `volatility5`, `volatility20`, `trend_strength20`, `trend_strength60`, `rebound_from_20d_low`, `rebound_from_60d_low`, `macd_signal`, `macd_histogram`, `ma20_slope`, `ma60_slope`, `close_vs_ma60` | `linear_clipped` lower=0.50, upper=0.50, min=0.00, max=1.00, smooth=5 |
+| gradient_boosting | 91.89% | -12.06% | 2.52 | 0.617 | -7.39% | 20 | `volatility5`, `volatility20_rank`, `rebound_from_60d_low`, `volatility20`, `macd_histogram`, `bb_width`, `trend_strength60`, `macd_signal`, `ma60`, `rebound_from_20d_low`, `bb_lower`, `ma60_slope`, `ma10`, `ma20_slope`, `close_vs_ma60`, `ma5`, `bb_upper`, `trend_strength20`, `momentum20`, `volume_zscore20` | `linear_clipped` lower=0.50, upper=0.55, min=0.00, max=1.00, smooth=3 |
+| hist_gradient_boosting | 115.36% | -5.87% | 3.84 | 0.653 | 16.08% | 20 | `volatility5`, `volatility20_rank`, `rebound_from_60d_low`, `volatility20`, `macd_histogram`, `bb_width`, `trend_strength60`, `macd_signal`, `ma60`, `rebound_from_20d_low`, `bb_lower`, `ma60_slope`, `ma10`, `ma20_slope`, `close_vs_ma60`, `ma5`, `bb_upper`, `trend_strength20`, `momentum20`, `volume_zscore20` | `rank_linear` lower_rank=0.4, upper_rank=0.8, min=0.00, max=1.00, smooth=1 |
+| lightgbm | 80.74% | -17.16% | 2.07 | 0.630 | -18.54% | 20 | `volatility5`, `volatility20_rank`, `rebound_from_60d_low`, `volatility20`, `macd_histogram`, `bb_width`, `trend_strength60`, `macd_signal`, `ma60`, `rebound_from_20d_low`, `bb_lower`, `ma60_slope`, `ma10`, `ma20_slope`, `close_vs_ma60`, `ma5`, `bb_upper`, `trend_strength20`, `momentum20`, `volume_zscore20` | `linear_clipped` lower=0.50, upper=0.65, min=0.00, max=1.00, smooth=5 |
+| LSTM (GRU) | 84.73% | -15.30% | 2.18 | 0.500 | -14.55% | 12 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20` | `sigmoid` center=0.50, sharpness=16.0, min=0.50, max=1.00, smooth=1 |
+| LSTM (GRU) | 84.73% | -15.30% | 2.18 | 0.500 | -14.55% | 20 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank` | `sigmoid` center=0.50, sharpness=16.0, min=0.50, max=1.00, smooth=1 |
+| LSTM (GRU) | 84.73% | -15.30% | 2.18 | 0.500 | -14.55% | 20 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `sigmoid` center=0.50, sharpness=16.0, min=0.50, max=1.00, smooth=1 |
+| LSTM (GRU) | 84.73% | -15.30% | 2.18 | 0.486 | -14.55% | 28 | `ret_1d`, `ma5`, `ma10`, `ma20`, `ma60`, `momentum5`, `momentum10`, `momentum20`, `volatility5`, `volatility20`, `range_pct`, `volume_change20`, `close_vs_ma20`, `close_vs_ma60`, `ma20_slope`, `ma60_slope`, `drawdown_from_20d_high`, `drawdown_from_60d_high`, `volume_zscore20`, `volatility20_rank`, `ma_alignment`, `trend_strength20`, `trend_strength60`, `ret5_over_vol20`, `ret20_over_vol20`, `rebound_from_20d_low`, `rebound_from_60d_low`, `range_zscore20` | `sigmoid` center=0.50, sharpness=16.0, min=0.50, max=1.00, smooth=5 |
