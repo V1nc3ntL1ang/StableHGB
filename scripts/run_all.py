@@ -55,6 +55,14 @@ def main() -> None:
     run_elapsed = time.perf_counter() - run_started
     print(f"\ncompleted {total_steps} steps in {run_elapsed:.1f}s", flush=True)
 
+    try:
+        from src.experiment_recorder import ExperimentRecorder
+
+        recorder = ExperimentRecorder()
+        recorder.record_interactive(runtime=run_elapsed)
+    except ImportError as e:
+        print(f"警告: 无法导入实验记录器 - {e}")
+
 
 if __name__ == "__main__":
     main()
