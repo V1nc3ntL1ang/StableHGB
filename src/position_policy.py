@@ -7,7 +7,6 @@ from collections.abc import Iterator, Mapping
 import numpy as np
 import pandas as pd
 
-
 LOWER_PROB_CANDIDATES = [0.30, 0.35, 0.40, 0.45, 0.50]
 UPPER_PROB_CANDIDATES = [0.50, 0.55, 0.60, 0.65, 0.70]
 LOWER_RANK_CANDIDATES = [0.15, 0.20, 0.25, 0.30, 0.35, 0.40]
@@ -20,27 +19,6 @@ MIN_POSITION_CANDIDATES = [0.0, 0.1, 0.2, 0.25, 0.3, 0.4, 0.5]
 MAX_POSITION_CANDIDATES = [0.6, 0.7, 0.75, 0.8, 0.9, 1.0]
 SMOOTHING_WINDOW_CANDIDATES = [1, 2, 3, 5, 7, 10]
 SMOOTHING_METHOD_CANDIDATES = ["sma", "ewma"]
-
-LOCKED_ALIGNMENT_CONFIRMATION_MODEL = "hist_gradient_boosting_alignment_confirmation"
-LOCKED_ALIGNMENT_CONFIRMATION_POLICY = {
-    "mapping_type": "rank_confirmation",
-    "entry_rank": 0.50,
-    "exit_rank": 0.4875,
-    "confirm_days": 2,
-    "min_position": 0.0,
-    "max_position": 1.0,
-    "smoothing_window": 1,
-    "smoothing_method": "sma",
-    "regime_floor_feature": "ma_alignment",
-    "regime_floor_threshold": 0.5,
-    "regime_floor_position": 1.0,
-}
-
-
-def get_locked_policy_for_model(model_name: str) -> dict[str, float | int | str] | None:
-    if model_name != LOCKED_ALIGNMENT_CONFIRMATION_MODEL:
-        return None
-    return LOCKED_ALIGNMENT_CONFIRMATION_POLICY.copy()
 
 
 def iter_position_policy_candidates() -> Iterator[dict[str, float | int | str]]:
@@ -238,8 +216,8 @@ def build_position(signal: pd.Series, params: Mapping[str, float | int | str]) -
             min_position=min_position,
             max_position=max_position,
         )
-    elif mapping_type == "rank_confirmation":
-        raw_position = _rank_confirmation(
+    elif mapping_type == "relative_signal_stabilizer":
+        raw_position = _relative_signal_stabilizer(
             signal,
             entry_rank=float(params["entry_rank"]),
             exit_rank=float(params["exit_rank"]),
@@ -259,18 +237,17 @@ def build_policy_position(
     params: Mapping[str, float | int | str],
 ) -> pd.Series:
     position = build_position(signal, params)
-    floor_feature = params.get("regime_floor_feature")
-    if floor_feature is None:
+    if "trend_guard_feature" not in params:
         return position
 
-    floor_feature_name = str(floor_feature)
-    if floor_feature_name not in df.columns:
-        raise ValueError(f"regime floor feature missing from dataset: {floor_feature_name}")
+    guard_feature_name = str(params["trend_guard_feature"])
+    if guard_feature_name not in df.columns:
+        raise ValueError(f"Trend Position Guard feature missing from dataset: {guard_feature_name}")
 
-    floor_threshold = float(params["regime_floor_threshold"])
-    floor_position = float(params["regime_floor_position"])
-    regime_mask = df[floor_feature_name].astype(float) > floor_threshold
-    return position.mask(regime_mask & (position < floor_position), floor_position).clip(lower=0.0, upper=1.0)
+    guard_threshold = float(params["trend_guard_threshold"])
+    guard_min_position = float(params["trend_guard_min_position"])
+    trend_mask = df[guard_feature_name].astype(float) > guard_threshold
+    return position.mask(trend_mask & (position < guard_min_position), guard_min_position).clip(lower=0.0, upper=1.0)
 
 
 def expanding_percentile_rank(signal: pd.Series) -> pd.Series:
@@ -362,7 +339,7 @@ def _threshold_mapping(
     )
 
 
-def _rank_confirmation(
+def _relative_signal_stabilizer(
     signal: pd.Series,
     *,
     entry_rank: float,

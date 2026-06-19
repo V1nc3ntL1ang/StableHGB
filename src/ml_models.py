@@ -9,6 +9,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+from src.stable_hgb import STABLE_HGB_MODEL_NAME, STABLE_HGB_MODEL_PARAMS
+
 
 RANDOM_STATE = 42
 
@@ -56,14 +58,8 @@ def get_ml_models(n_jobs: int | None = None) -> OrderedDict[str, object]:
                 ),
             ),
             (
-                "hist_gradient_boosting_alignment_confirmation",
-                HistGradientBoostingClassifier(
-                    max_iter=150,
-                    learning_rate=0.05,
-                    max_leaf_nodes=8,
-                    min_samples_leaf=38,
-                    random_state=RANDOM_STATE,
-                ),
+                STABLE_HGB_MODEL_NAME,
+                HistGradientBoostingClassifier(**STABLE_HGB_MODEL_PARAMS),
             ),
             (
                 "lightgbm",

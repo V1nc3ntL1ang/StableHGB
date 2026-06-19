@@ -1,0 +1,14 @@
+name: finance-stablehgb
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11.15
+  - numpy=2.4.6
+  - pandas=3.0.3
+  - scipy=1.17.1
+  - scikit-learn=1.9.0
+  - lightgbm=4.6.0
+  - matplotlib=3.10.9
+  - joblib=1.5.3
+  - tqdm=4.68.2
+  - pillow=12.2.0

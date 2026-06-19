@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import argparse
-import os
 import sys
 from pathlib import Path
 
 import pandas as pd
 from joblib import Parallel, delayed
-from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.metrics import accuracy_score
 from tqdm import tqdm
 
 
@@ -15,237 +13,381 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.backtest import compute_metrics, run_backtest, write_equity_csv, write_metrics_csv
-from src.experiment_config import RETURN_WEIGHT, SELECTION_OBJECTIVE, SHARPE_WEIGHT, TEST_START, VALID_START
+from src.experiment_config import RETURN_WEIGHT, SHARPE_WEIGHT, TEST_START
+from src.ml_dataset import FEATURE_COLUMNS
 from src.ml_models import get_ml_models
-from src.model_features import MODEL_FEATURE_COLUMNS, validate_model_feature_columns
-from src.paths import ML_DATASET_CSV, ML_EQUITY_CSV, ML_METRICS_CSV, ensure_output_dirs
-from src.position_policy import build_policy_position, get_locked_policy_for_model, iter_position_policy_candidates
+from src.experiment_protocol import (
+    FINAL_MODEL_TRAIN_CUTOFF,
+    FORMAL_SELECTION_RULE,
+    FORMAL_SELECTION_RULE_DESCRIPTION,
+    INVESTMENT_END,
+    VALIDATION_FOLDS,
+    get_worker_count,
+    load_formal_frames,
+    policy_to_json,
+    safe_auc,
+    score_metrics,
+    select_policy,
+)
+from src.paths import (
+    ML_BASELINE_EQUITY_CSV,
+    ML_BASELINE_METRICS_CSV,
+    ML_BASELINE_VALIDATION_CSV,
+    ensure_output_dirs,
+)
+from src.position_policy import build_policy_position
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run ML timing baselines.")
-    parser.add_argument("--models", nargs="+", help="Optional model names to run instead of all models.")
-    parser.add_argument(
-        "--merge-existing",
-        action="store_true",
-        help="Merge selected model outputs into existing ML metrics/equity files.",
-    )
-    return parser.parse_args()
+ML_BASELINE_MODEL_NAMES = [
+    "logistic_regression",
+    "random_forest",
+    "gradient_boosting",
+    "hist_gradient_boosting",
+    "lightgbm",
+]
 
 
-def get_worker_count() -> int:
-    return int(os.environ.get("FINANCE_WORKERS", os.cpu_count() or 1))
+def list_policy_candidates() -> list[dict[str, float | int | str]]:
+    candidates: list[dict[str, float | int | str]] = []
+
+    min_positions = [0.0, 0.10, 0.20, 0.30]
+    max_positions = [0.70, 0.80, 0.90, 1.0]
+    smoothing_windows = [1, 3, 5]
+    smoothing_methods = ["sma"]
+
+    for min_position in min_positions:
+        for max_position in max_positions:
+            if min_position > max_position:
+                continue
+            for smoothing_window in smoothing_windows:
+                for smoothing_method in smoothing_methods:
+                    common = {
+                        "min_position": min_position,
+                        "max_position": max_position,
+                        "smoothing_window": smoothing_window,
+                        "smoothing_method": smoothing_method,
+                    }
+
+                    for lower_prob in [0.35, 0.40, 0.45, 0.50, 0.55]:
+                        for upper_prob in [0.50, 0.55, 0.60, 0.65, 0.70, 0.75]:
+                            if lower_prob >= upper_prob:
+                                continue
+                            candidates.append(
+                                {
+                                    "mapping_type": "linear_clipped",
+                                    "lower_prob": lower_prob,
+                                    "upper_prob": upper_prob,
+                                    **common,
+                                }
+                            )
+
+                    for lower_rank in [0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45]:
+                        for upper_rank in [0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90]:
+                            candidates.append(
+                                {
+                                    "mapping_type": "rank_linear",
+                                    "lower_rank": lower_rank,
+                                    "upper_rank": upper_rank,
+                                    **common,
+                                }
+                            )
+
+                    for center_prob in [0.40, 0.45, 0.50, 0.55, 0.60]:
+                        for sharpness in [6.0, 8.0, 10.0, 12.0, 16.0, 20.0]:
+                            candidates.append(
+                                {
+                                    "mapping_type": "sigmoid",
+                                    "center_prob": center_prob,
+                                    "sharpness": sharpness,
+                                    **common,
+                                }
+                            )
+
+                    for lower_prob in [0.35, 0.40, 0.45, 0.50, 0.55]:
+                        for upper_prob in [0.55, 0.60, 0.65, 0.70, 0.75]:
+                            if lower_prob >= upper_prob:
+                                continue
+                            for power in [1.0, 1.5, 2.0, 3.0]:
+                                candidates.append(
+                                    {
+                                        "mapping_type": "power",
+                                        "lower_prob": lower_prob,
+                                        "upper_prob": upper_prob,
+                                        "power": power,
+                                        **common,
+                                    }
+                                )
+
+                    for threshold in [0.45, 0.50, 0.55, 0.60, 0.65]:
+                        candidates.append(
+                            {
+                                "mapping_type": "threshold",
+                                "threshold": threshold,
+                                **common,
+                            }
+                        )
+
+    disallowed_mapping_types = {"relative_signal_stabilizer"}
+    if any(candidate["mapping_type"] in disallowed_mapping_types for candidate in candidates):
+        raise AssertionError("Panel B policy candidates must not include StableHGB mappings")
+    if any("trend_guard_feature" in candidate for candidate in candidates):
+        raise AssertionError("Panel B policy candidates must not include Trend Position Guard rules")
+
+    return candidates
 
 
-def load_dataset() -> pd.DataFrame:
-    df = pd.read_csv(ML_DATASET_CSV)
-    df["date"] = pd.to_datetime(df["date"], format="%Y/%m/%d")
-    numeric_columns = [column for column in df.columns if column not in {"date", "split"}]
-    df[numeric_columns] = df[numeric_columns].apply(pd.to_numeric)
-    return df.sort_values("date").reset_index(drop=True)
+def evaluate_policy_candidate(
+    df: pd.DataFrame,
+    probability: pd.Series,
+    candidate_index: int,
+    params: dict[str, float | int | str],
+    fold_name: str,
+    fold_start: pd.Timestamp,
+    fold_end: pd.Timestamp,
+    buy_hold_metrics: dict[str, float],
+) -> dict[str, float | int | str]:
+    position = build_policy_position(df, probability, params)
+    equity = run_backtest(df, position, test_start=fold_start, test_end=fold_end)
+    metrics = compute_metrics(equity)
+    scores = score_metrics(metrics, buy_hold_metrics)
 
-
-def safe_auc(y_true: pd.Series, probability: pd.Series) -> float:
-    if y_true.nunique() < 2:
-        return float("nan")
-    return float(roc_auc_score(y_true, probability))
-
-
-def score_valid_metrics(
-    metrics: dict[str, float],
-    buy_hold_valid_metrics: dict[str, float],
-) -> dict[str, float]:
-    buy_hold_return = buy_hold_valid_metrics["cumulative_return"]
-    buy_hold_sharpe = buy_hold_valid_metrics["sharpe"]
-
-    return_score = metrics["cumulative_return"] / buy_hold_return if buy_hold_return != 0 else 0.0
-    sharpe_score = metrics["sharpe"] / buy_hold_sharpe if buy_hold_sharpe != 0 else 0.0
-    selection_score = RETURN_WEIGHT * return_score + SHARPE_WEIGHT * sharpe_score
     return {
-        "valid_selection_score": selection_score,
-        "valid_return_score": return_score,
-        "valid_sharpe_score": sharpe_score,
+        "fold": fold_name,
+        "candidate_index": candidate_index,
+        "policy_params": policy_to_json(params),
+        "mapping_type": str(params["mapping_type"]),
+        **scores,
+        "valid_cumulative_return": metrics["cumulative_return"],
+        "valid_annualized_return": metrics["annualized_return"],
+        "valid_max_drawdown": metrics["max_drawdown"],
+        "valid_sharpe": metrics["sharpe"],
     }
 
 
-def choose_exposure_mapping(
-    df: pd.DataFrame,
-    probability: pd.Series,
-    *,
+def evaluate_validation_fold(
     model_name: str,
-    buy_hold_valid_metrics: dict[str, float],
-) -> tuple[dict[str, float | int | str], dict[str, float], dict[str, float]]:
-    def evaluate_params(params: dict[str, float | int | str]) -> tuple[dict[str, float | int | str], dict[str, float], dict[str, float]]:
-        position = build_policy_position(df, probability, params)
-        valid_equity = run_backtest(df, position, test_start=VALID_START, test_end=TEST_START)
-        metrics = compute_metrics(valid_equity)
-        scores = score_valid_metrics(metrics, buy_hold_valid_metrics)
-        return params.copy(), metrics, scores
+    labeled: pd.DataFrame,
+    candidates: list[dict[str, float | int | str]],
+    fold_name: str,
+    fold_start: pd.Timestamp,
+    fold_end: pd.Timestamp,
+    worker_count: int,
+) -> tuple[list[dict[str, float | int | str]], dict[str, float]]:
+    train = labeled[labeled["target_end_date"] < fold_start]
+    valid_labels = labeled[
+        (labeled["date"] >= fold_start)
+        & (labeled["date"] < fold_end)
+        & (labeled["target_end_date"] < fold_end)
+    ]
+    if train.empty or valid_labels.empty:
+        raise ValueError(f"{fold_name} has empty train or validation labels")
 
-    candidates = list(iter_position_policy_candidates())
-    result_iter = Parallel(n_jobs=get_worker_count(), prefer="threads", return_as="generator")(
-        delayed(evaluate_params)(params) for params in candidates
+    print(
+        f"[{model_name}] {fold_name}: train_labels={len(train)} "
+        f"valid_labels={len(valid_labels)} candidates={len(candidates)}",
+        flush=True,
     )
-    results = list(
+    model = get_ml_models(n_jobs=worker_count)[model_name]
+    model.fit(train[FEATURE_COLUMNS], train["future_up_5d"])
+    probability = pd.Series(model.predict_proba(labeled[FEATURE_COLUMNS])[:, 1], index=labeled.index)
+
+    buy_hold_position = pd.Series(1.0, index=labeled.index)
+    buy_hold_metrics = compute_metrics(
+        run_backtest(labeled, buy_hold_position, test_start=fold_start, test_end=fold_end)
+    )
+
+    result_iter = Parallel(n_jobs=worker_count, prefer="threads", return_as="generator", batch_size=16)(
+        delayed(evaluate_policy_candidate)(
+            labeled,
+            probability,
+            candidate_index,
+            params,
+            fold_name,
+            fold_start,
+            fold_end,
+            buy_hold_metrics,
+        )
+        for candidate_index, params in enumerate(candidates)
+    )
+    rows = list(
         tqdm(
             result_iter,
             total=len(candidates),
-            desc=f"{model_name} policy",
+            desc=f"{model_name} {fold_name}",
             unit="policy",
             dynamic_ncols=True,
         )
     )
 
-    best_params, best_metrics, best_scores = max(
-        results,
-        key=lambda item: (item[2]["valid_selection_score"], item[1]["cumulative_return"]),
-    )
+    valid_probability = probability.loc[valid_labels.index]
+    label_metrics = {
+        f"{fold_name}_accuracy": float(
+            accuracy_score(valid_labels["future_up_5d"], (valid_probability >= 0.5).astype(int))
+        ),
+        f"{fold_name}_auc": safe_auc(valid_labels["future_up_5d"], valid_probability),
+    }
+    for row in rows:
+        row["model"] = model_name
+        row["buy_hold_cumulative_return"] = buy_hold_metrics["cumulative_return"]
+        row["buy_hold_sharpe"] = buy_hold_metrics["sharpe"]
 
-    return best_params, best_metrics, best_scores
+    return rows, label_metrics
 
 
-def evaluate_model(
+def evaluate_final_model(
     model_name: str,
-    df: pd.DataFrame,
-    train: pd.DataFrame,
-    valid: pd.DataFrame,
-    test: pd.DataFrame,
-    y_train: pd.Series,
-    y_valid: pd.Series,
-    y_test: pd.Series,
-    valid_buy_hold_metrics: dict[str, float],
-) -> tuple[dict[str, float | str], pd.DataFrame]:
-    model = get_ml_models(n_jobs=get_worker_count())[model_name]
-    feature_columns = MODEL_FEATURE_COLUMNS[model_name]
-    model.fit(train[feature_columns], y_train)
+    labeled: pd.DataFrame,
+    trading: pd.DataFrame,
+    params: dict[str, float | int | str],
+    validation_summary: pd.Series,
+    validation_label_metrics: dict[str, float],
+    worker_count: int,
+) -> tuple[dict[str, float | int | str], pd.DataFrame]:
+    train = labeled[labeled["target_end_date"] < FINAL_MODEL_TRAIN_CUTOFF]
+    test_labels = labeled[(labeled["date"] >= TEST_START) & (labeled["target_end_date"] <= INVESTMENT_END)]
+    if train.empty or test_labels.empty:
+        raise ValueError(f"{model_name} has empty final train or test labels")
 
-    probability = pd.Series(model.predict_proba(df[feature_columns])[:, 1], index=df.index)
-    valid_probability = probability.loc[valid.index]
-    test_probability = probability.loc[test.index]
+    model = get_ml_models(n_jobs=worker_count)[model_name]
+    model.fit(train[FEATURE_COLUMNS], train["future_up_5d"])
 
-    locked_policy = get_locked_policy_for_model(model_name)
-    if locked_policy is None:
-        mapping_params, valid_backtest_metrics, valid_selection_scores = choose_exposure_mapping(
-            df,
-            probability,
-            model_name=model_name,
-            buy_hold_valid_metrics=valid_buy_hold_metrics,
-        )
-        policy_selection = "valid_grid_search"
-    else:
-        mapping_params = locked_policy
-        valid_position = build_policy_position(df, probability, mapping_params)
-        valid_backtest_metrics = compute_metrics(
-            run_backtest(df, valid_position, test_start=VALID_START, test_end=TEST_START)
-        )
-        valid_selection_scores = score_valid_metrics(valid_backtest_metrics, valid_buy_hold_metrics)
-        policy_selection = "locked_multifold_min_score"
+    trading_probability = pd.Series(model.predict_proba(trading[FEATURE_COLUMNS])[:, 1], index=trading.index)
+    position = build_policy_position(trading, trading_probability, params)
+    equity = run_backtest(trading, position, test_start=TEST_START)
+    metrics = compute_metrics(equity)
 
-    position = build_policy_position(df, probability, mapping_params)
-    test_equity = run_backtest(df, position, test_start=TEST_START)
-    test_backtest_metrics = compute_metrics(test_equity)
+    buy_hold_position = pd.Series(1.0, index=trading.index)
+    buy_hold_metrics = compute_metrics(run_backtest(trading, buy_hold_position, test_start=TEST_START))
 
-    valid_pred = (valid_probability >= 0.5).astype(int)
+    test_probability = pd.Series(model.predict_proba(test_labels[FEATURE_COLUMNS])[:, 1], index=test_labels.index)
     test_pred = (test_probability >= 0.5).astype(int)
 
-    metric_row: dict[str, float | str] = {
+    metric_row: dict[str, float | int | str] = {
         "model": model_name,
-        "feature_count": len(feature_columns),
-        "features": ", ".join(feature_columns),
-        "selection_objective": SELECTION_OBJECTIVE,
-        "policy_selection": policy_selection,
+        "panel": "Panel B",
+        "feature_count": len(FEATURE_COLUMNS),
+        "features": ", ".join(FEATURE_COLUMNS),
+        "validation_method": "rolling_folds_2022_2024",
+        "policy_selection": FORMAL_SELECTION_RULE,
+        "selection_rule": FORMAL_SELECTION_RULE_DESCRIPTION,
         "return_weight": RETURN_WEIGHT,
         "sharpe_weight": SHARPE_WEIGHT,
-        **valid_selection_scores,
-        **mapping_params,
-        "valid_accuracy": float(accuracy_score(y_valid, valid_pred)),
-        "test_accuracy": float(accuracy_score(y_test, test_pred)),
-        "valid_auc": safe_auc(y_valid, valid_probability),
-        "test_auc": safe_auc(y_test, test_probability),
-        "valid_cumulative_return": valid_backtest_metrics["cumulative_return"],
-        "valid_max_drawdown": valid_backtest_metrics["max_drawdown"],
-        "valid_sharpe": valid_backtest_metrics["sharpe"],
-        **test_backtest_metrics,
+        "train_label_start": train["date"].min().strftime("%Y/%m/%d"),
+        "train_label_end": train["date"].max().strftime("%Y/%m/%d"),
+        "train_target_end": train["target_end_date"].max().strftime("%Y/%m/%d"),
+        "test_label_start": test_labels["date"].min().strftime("%Y/%m/%d"),
+        "test_label_end": test_labels["date"].max().strftime("%Y/%m/%d"),
+        "test_target_end": test_labels["target_end_date"].max().strftime("%Y/%m/%d"),
+        "investment_start": TEST_START.strftime("%Y/%m/%d"),
+        "investment_end": INVESTMENT_END.strftime("%Y/%m/%d"),
+        "trading_days": len(equity),
+        "selected_mapping_type": str(params["mapping_type"]),
+        "selected_policy_params": policy_to_json(params),
+        "valid_score": float(validation_summary["valid_score"]),
+        "valid_min_score": float(validation_summary["valid_min_score"]),
+        "valid_mean_score": float(validation_summary["valid_mean_score"]),
+        "valid_mean_return": float(validation_summary["valid_mean_return"]),
+        "valid_return_std": float(validation_summary["valid_return_std"]),
+        "valid_mean_sharpe": float(validation_summary["valid_mean_sharpe"]),
+        "valid_worst_drawdown": float(validation_summary["valid_worst_drawdown"]),
+        **validation_label_metrics,
+        "test_accuracy": float(accuracy_score(test_labels["future_up_5d"], test_pred)),
+        "test_auc": safe_auc(test_labels["future_up_5d"], test_probability),
+        "buy_hold_cumulative_return": buy_hold_metrics["cumulative_return"],
+        "excess_return_vs_buy_hold": metrics["cumulative_return"] - buy_hold_metrics["cumulative_return"],
+        **metrics,
     }
 
-    test_equity.insert(0, "model", model_name)
-    return metric_row, test_equity
+    equity.insert(0, "model", model_name)
+    return metric_row, equity
 
 
 def main() -> None:
-    args = parse_args()
     ensure_output_dirs()
     worker_count = get_worker_count()
-    print(f"aggressive CPU mode: workers={worker_count}", flush=True)
+    candidates = list_policy_candidates()
+    labeled, trading = load_formal_frames()
 
-    df = load_dataset()
-    train = df[df["split"] == "train"]
-    valid = df[df["split"] == "valid"]
-    test = df[df["split"] == "test"]
-
-    y_train = train["future_up_5d"]
-    y_valid = valid["future_up_5d"]
-    y_test = test["future_up_5d"]
-
-    buy_hold_position = pd.Series(1.0, index=df.index)
-    valid_buy_hold_metrics = compute_metrics(
-        run_backtest(df, buy_hold_position, test_start=VALID_START, test_end=TEST_START)
+    print(
+        f"ml baseline protocol: workers={worker_count} models={len(ML_BASELINE_MODEL_NAMES)} "
+        f"folds={len(VALIDATION_FOLDS)} candidates_per_fold={len(candidates)}",
+        flush=True,
+    )
+    print(
+        f"labeled: {labeled['date'].min().date()}..{labeled['date'].max().date()} "
+        f"rows={len(labeled)} target_end_max={labeled['target_end_date'].max().date()}",
+        flush=True,
+    )
+    print(
+        f"trading: {trading['date'].min().date()}..{trading['date'].max().date()} rows={len(trading)}",
+        flush=True,
     )
 
-    all_model_names = list(get_ml_models(n_jobs=worker_count))
-    if args.models:
-        unknown_models = sorted(set(args.models) - set(all_model_names))
-        if unknown_models:
-            raise ValueError(f"Unknown models: {', '.join(unknown_models)}")
-        model_names = args.models
-    else:
-        model_names = all_model_names
-    validate_model_feature_columns(all_model_names, df.columns)
+    unknown_models = sorted(set(ML_BASELINE_MODEL_NAMES) - set(get_ml_models(n_jobs=worker_count)))
+    if unknown_models:
+        raise ValueError(f"Unknown models: {', '.join(unknown_models)}")
 
-    results = []
-    for model_name in tqdm(model_names, desc="models", unit="model", dynamic_ncols=True):
-        results.append(
-            evaluate_model(
+    metric_rows: list[dict[str, float | int | str]] = []
+    equity_frames: list[pd.DataFrame] = []
+    all_validation_rows: list[dict[str, float | int | str]] = []
+
+    for model_name in ML_BASELINE_MODEL_NAMES:
+        print(f"\n[{model_name}] validation search started", flush=True)
+        model_validation_rows: list[dict[str, float | int | str]] = []
+        validation_label_metrics: dict[str, float] = {}
+
+        for fold_name, fold_start, fold_end in VALIDATION_FOLDS:
+            fold_rows, fold_label_metrics = evaluate_validation_fold(
                 model_name,
-                df,
-                train,
-                valid,
-                test,
-                y_train,
-                y_valid,
-                y_test,
-                valid_buy_hold_metrics,
+                labeled,
+                candidates,
+                fold_name,
+                fold_start,
+                fold_end,
+                worker_count,
             )
+            model_validation_rows.extend(fold_rows)
+            validation_label_metrics.update(fold_label_metrics)
+
+        best_index, validation_summary = select_policy(model_validation_rows)
+        best_params = candidates[best_index]
+        print(
+            f"[{model_name}] selected candidate={best_index} mapping={best_params['mapping_type']} "
+            f"valid_score={validation_summary['valid_score']:.6f} "
+            f"mean_return={validation_summary['valid_mean_return']:.6f}",
+            flush=True,
         )
 
-    metrics_rows = [row for row, _equity in results]
-    equity_frames = [equity for _row, equity in results]
+        metric_row, equity = evaluate_final_model(
+            model_name,
+            labeled,
+            trading,
+            best_params,
+            validation_summary,
+            validation_label_metrics,
+            worker_count,
+        )
+        metric_rows.append(metric_row)
+        equity_frames.append(equity)
+        all_validation_rows.extend(model_validation_rows)
+        print(
+            f"[{model_name}] final_return={metric_row['cumulative_return']:.6f} "
+            f"excess={metric_row['excess_return_vs_buy_hold']:.6f} "
+            f"max_dd={metric_row['max_drawdown']:.6f}",
+            flush=True,
+        )
 
-    new_metrics = pd.DataFrame(metrics_rows)
-    buy_hold_return = compute_metrics(run_backtest(df, buy_hold_position, test_start=TEST_START))["cumulative_return"]
-    if args.merge_existing and ML_METRICS_CSV.exists():
-        previous_metrics = pd.read_csv(ML_METRICS_CSV)
-        previous_metrics = previous_metrics[~previous_metrics["model"].isin(model_names)]
-        metrics = pd.concat([previous_metrics, new_metrics], ignore_index=True, sort=False)
-    else:
-        metrics = new_metrics
-    if "policy_selection" in metrics.columns:
-        metrics["policy_selection"] = metrics["policy_selection"].fillna("valid_grid_search")
-    metrics["excess_return_vs_buy_hold"] = metrics["cumulative_return"] - buy_hold_return
+    metrics = pd.DataFrame(metric_rows)
+    validation = pd.DataFrame(all_validation_rows)
+    equity = pd.concat(equity_frames, ignore_index=True)
 
-    new_equity = pd.concat(equity_frames, ignore_index=True)
-    if args.merge_existing and ML_EQUITY_CSV.exists():
-        previous_equity = pd.read_csv(ML_EQUITY_CSV)
-        previous_equity["date"] = pd.to_datetime(previous_equity["date"], format="%Y/%m/%d")
-        previous_equity = previous_equity[~previous_equity["model"].isin(model_names)]
-        equity = pd.concat([previous_equity, new_equity], ignore_index=True, sort=False)
-    else:
-        equity = new_equity
+    write_metrics_csv(metrics, ML_BASELINE_METRICS_CSV)
+    write_metrics_csv(validation, ML_BASELINE_VALIDATION_CSV)
+    write_equity_csv(equity, ML_BASELINE_EQUITY_CSV)
 
-    write_metrics_csv(metrics, ML_METRICS_CSV)
-    write_equity_csv(equity, ML_EQUITY_CSV)
-    print(f"wrote {ML_METRICS_CSV} models={len(metrics)}")
-    print(f"wrote {ML_EQUITY_CSV} rows={len(equity)}")
+    print(f"\nwrote {ML_BASELINE_METRICS_CSV} models={len(metrics)}", flush=True)
+    print(f"wrote {ML_BASELINE_VALIDATION_CSV} rows={len(validation)}", flush=True)
+    print(f"wrote {ML_BASELINE_EQUITY_CSV} rows={len(equity)}", flush=True)
 
 
 if __name__ == "__main__":

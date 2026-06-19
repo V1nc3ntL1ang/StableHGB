@@ -12,21 +12,30 @@ OUTPUT_DIR = PROJECT_ROOT / "outputs"
 METRICS_DIR = OUTPUT_DIR / "metrics"
 EQUITY_DIR = OUTPUT_DIR / "equity"
 PLOTS_DIR = OUTPUT_DIR / "plots"
-BASELINE_PLOTS_DIR = PLOTS_DIR / "baseline"
-ML_PLOTS_DIR = PLOTS_DIR / "ml"
 
 DAILY_CSV = PROCESSED_DATA_DIR / "daily.csv"
 DAILY_FEATURES_CSV = PROCESSED_DATA_DIR / "daily_features.csv"
 ML_DATASET_CSV = PROCESSED_DATA_DIR / "ml_dataset.csv"
 
-BASELINE_METRICS_CSV = METRICS_DIR / "baseline_metrics.csv"
-ML_METRICS_CSV = METRICS_DIR / "ml_metrics.csv"
-FEATURE_IMPORTANCE_CSV = METRICS_DIR / "feature_importance.csv"
+BASELINE_METRICS_CSV = METRICS_DIR / "baselines.csv"
+ML_BASELINE_METRICS_CSV = METRICS_DIR / "ml_baselines.csv"
+ML_BASELINE_VALIDATION_CSV = METRICS_DIR / "ml_validation_folds.csv"
+STABLE_HGB_METRICS_CSV = METRICS_DIR / "stable_hgb_metrics.csv"
+STABLE_HGB_VALIDATION_CSV = METRICS_DIR / "stable_hgb_validation_folds.csv"
+STABLE_HGB_ABLATION_CSV = METRICS_DIR / "stable_hgb_ablation.csv"
+STABLE_HGB_ABLATION_MD = METRICS_DIR / "stable_hgb_ablation.md"
+STABLE_HGB_ABLATION_VALIDATION_CSV = METRICS_DIR / "stable_hgb_ablation_validation.csv"
 
-BASELINE_EQUITY_CSV = EQUITY_DIR / "baseline_equity.csv"
-ML_EQUITY_CSV = EQUITY_DIR / "ml_equity.csv"
+BASELINE_EQUITY_CSV = EQUITY_DIR / "baselines.csv"
+ML_BASELINE_EQUITY_CSV = EQUITY_DIR / "ml_baselines.csv"
+STABLE_HGB_EQUITY_CSV = EQUITY_DIR / "stable_hgb_equity.csv"
 
-FEATURE_IMPORTANCE_PLOT = PLOTS_DIR / "feature_importance.png"
+BASELINES_PLOT = PLOTS_DIR / "all_baselines.png"
+ML_BASELINES_PLOT = PLOTS_DIR / "all_ml_baselines.png"
+STABLE_HGB_REFERENCE_PLOT = PLOTS_DIR / "stable_hgb_vs_references.png"
+DRAWDOWN_REFERENCE_PLOT = PLOTS_DIR / "drawdown_stablehgb_references.png"
+RISK_RETURN_PLOT = PLOTS_DIR / "risk_return_scatter.png"
+STABLE_HGB_POSITION_PLOT = PLOTS_DIR / "stable_hgb_position.png"
 
 
 def ensure_output_dirs() -> None:
@@ -34,7 +43,5 @@ def ensure_output_dirs() -> None:
         METRICS_DIR,
         EQUITY_DIR,
         PLOTS_DIR,
-        BASELINE_PLOTS_DIR,
-        ML_PLOTS_DIR,
     ]:
         path.mkdir(parents=True, exist_ok=True)

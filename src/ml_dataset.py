@@ -31,7 +31,7 @@ FEATURE_COLUMNS = [
 
 TARGET_COLUMNS = ["future_ret_5d", "future_up_5d"]
 
-OUTPUT_COLUMNS = [
+FEATURE_OUTPUT_COLUMNS = [
     "date",
     "open",
     "high",
@@ -43,12 +43,16 @@ OUTPUT_COLUMNS = [
     "ma20",
     "ma_alignment",
     *FEATURE_COLUMNS,
+]
+
+OUTPUT_COLUMNS = [
+    *FEATURE_OUTPUT_COLUMNS,
     *TARGET_COLUMNS,
     "split",
 ]
 
 
-def build_ml_dataset(daily: pd.DataFrame) -> pd.DataFrame:
+def add_ml_features(daily: pd.DataFrame) -> pd.DataFrame:
     df = daily.copy()
 
     df["ret_1d"] = df["close"].pct_change()
@@ -82,15 +86,26 @@ def build_ml_dataset(daily: pd.DataFrame) -> pd.DataFrame:
     df["bb_lower"] = bb_middle - 2 * bb_std
     df["bb_width"] = (df["bb_upper"] - df["bb_lower"]) / bb_middle
 
+    return df.replace([np.inf, -np.inf], np.nan)
+
+
+def build_ml_feature_frame(daily: pd.DataFrame) -> pd.DataFrame:
+    df = add_ml_features(daily)
+    df = df.dropna(subset=FEATURE_COLUMNS).reset_index(drop=True)
+    return df[FEATURE_OUTPUT_COLUMNS]
+
+
+def build_ml_dataset(daily: pd.DataFrame) -> pd.DataFrame:
+    df = add_ml_features(daily)
+
     df["future_ret_5d"] = df["close"].shift(-5) / df["close"] - 1
+    df = df.dropna(subset=FEATURE_COLUMNS + ["future_ret_5d"]).reset_index(drop=True)
     df["future_up_5d"] = (df["future_ret_5d"] > 0).astype(int)
 
     df["split"] = "train"
     df.loc[df["date"] >= pd.Timestamp("2024-01-01"), "split"] = "valid"
     df.loc[df["date"] >= pd.Timestamp("2025-01-01"), "split"] = "test"
 
-    df = df.replace([np.inf, -np.inf], np.nan)
-    df = df.dropna(subset=FEATURE_COLUMNS + ["future_ret_5d"]).reset_index(drop=True)
     return df[OUTPUT_COLUMNS]
 
 
