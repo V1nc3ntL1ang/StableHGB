@@ -65,7 +65,6 @@ StableHGB sharpe = 3.38
 |---|---|
 | Panel A metrics | `outputs/metrics/baselines.csv` |
 | Panel B metrics | `outputs/metrics/ml_baselines.csv` |
-| Panel B validation folds | `outputs/metrics/ml_validation_folds.csv` |
 | Panel C metrics | `outputs/metrics/stable_hgb_metrics.csv` |
 | Panel C validation folds | `outputs/metrics/stable_hgb_validation_folds.csv` |
 | Figures | `outputs/plots/` |

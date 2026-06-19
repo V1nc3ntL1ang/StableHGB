@@ -48,7 +48,7 @@ The experiment results are organized into three panels.
 | Panel | Script | Main outputs |
 |---|---|---|
 | Panel A: tradable baselines | `scripts/run_baselines.py` | `outputs/metrics/baselines.csv`, `outputs/equity/baselines.csv` |
-| Panel B: competitive ML baselines | `scripts/run_ml_baselines.py` | `outputs/metrics/ml_baselines.csv`, `outputs/metrics/ml_validation_folds.csv`, `outputs/equity/ml_baselines.csv` |
+| Panel B: competitive ML baselines | `scripts/run_ml_baselines.py` | `outputs/metrics/ml_baselines.csv`, `outputs/equity/ml_baselines.csv` |
 | Panel C: StableHGB | `scripts/run_stable_hgb.py` | `outputs/metrics/stable_hgb_metrics.csv`, `outputs/metrics/stable_hgb_validation_folds.csv`, `outputs/equity/stable_hgb_equity.csv` |
 
 Run the full workflow:

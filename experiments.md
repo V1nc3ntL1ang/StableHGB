@@ -14,7 +14,6 @@ This file records the reproducible experiments used for the course report.
 | Baseline output metrics | `outputs/metrics/baselines.csv` |
 | Baseline output equity curves | `outputs/equity/baselines.csv` |
 | Machine-learning output metrics | `outputs/metrics/ml_baselines.csv` |
-| Machine-learning validation folds | `outputs/metrics/ml_validation_folds.csv` |
 | Machine-learning output equity curves | `outputs/equity/ml_baselines.csv` |
 | StableHGB output metrics | `outputs/metrics/stable_hgb_metrics.csv` |
 | StableHGB validation folds | `outputs/metrics/stable_hgb_validation_folds.csv` |
@@ -144,7 +143,6 @@ Outputs:
 | Output | Path |
 |---|---|
 | Component ablation table | `outputs/metrics/stable_hgb_ablation.csv` |
-| Component ablation validation rows | `outputs/metrics/stable_hgb_ablation_validation.csv` |
 | Markdown table | `outputs/metrics/stable_hgb_ablation.md` |
 
 ## Figures
