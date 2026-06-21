@@ -1,6 +1,6 @@
 # StableHGB: Stable Index Timing with Histogram Gradient Boosting
 
-StableHGB is a machine-learning enhanced index timing strategy for the SH#880823 micro-cap index. It combines a histogram gradient boosting classifier with two custom trading-policy components designed to stabilize model signals and preserve market exposure during favorable trends.
+StableHGB is a machine-learning enhanced index timing strategy for  micro-cap index. It combines a histogram gradient boosting classifier with two custom trading-policy components designed to stabilize model signals and preserve market exposure during favorable trends.
 
 ## 📊 Key Results
 
